@@ -16,8 +16,8 @@ func Provider() *schema.Provider {
 			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
-			"secrets":    resourceSecrets(),
-			"parameters": resourceParameters(),
+			"parameters-manager_secrets":    resourceSecrets(),
+			"parameters-manager_parameters": resourceParameters(),
 		},
 		ConfigureFunc: providerConfigure,
 	}

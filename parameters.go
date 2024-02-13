@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,59 +30,120 @@ func resourceParameters() *schema.Resource {
 		},
 		Create: resourceParametersCreate,
 		Read:   resourceParametersRead,
-		Update: resourceParametersCreate, // Reuse create for updates
+		Update: resourceParametersUpdate,
 		Delete: resourceParametersDelete,
 	}
 }
 
-func parametersFilePath(directoryPath string, env string, app string) string {
+func parametersPath(directoryPath string, env string, app string) string {
 	return filepath.Join(directoryPath, "applications/clusters", env, "charts", app, "parameters.yaml")
 }
 
 func resourceParametersCreate(d *schema.ResourceData, m interface{}) error {
-	config := m.(*Config)
+	config := m.(*Config)                 // Cast the interface{} to *Config
+	directoryPath := config.DirectoryPath // Use the directory path from the provider config
+	parameters := d.Get("parameters").(map[string]interface{})
 	app := d.Get("app").(string)
 	env := d.Get("env").(string)
-	parameters := d.Get("parameters").(map[string]interface{})
-	directoryPath := config.DirectoryPath // Use the directory path from the provider config
-
-	parametersFilePath := parametersFilePath(directoryPath, env, app)
 
 	yamlContent, err := mapToYaml(parameters)
 	if err != nil {
 		return err
 	}
 
-	if err := os.WriteFile(parametersFilePath, []byte(yamlContent), 0644); err != nil {
-		return fmt.Errorf("error writing parameters file: %s", err)
+	p := parametersPath(directoryPath, env, app)
+	// Write to parameters.yaml file
+	if err := os.WriteFile(p, []byte(yamlContent), 0600); err != nil {
+		return fmt.Errorf("could not write to file %s: %s", p, err)
 	}
 
-	// Use a combination of app and env as a unique ID for the resource
-	d.SetId(fmt.Sprintf("%s-%s", env, app))
-	return resourceParametersRead(d, m)
+	id := fmt.Sprintf("%s-%s", env, app)
+	d.SetId(id)
+
+	return nil
+}
+
+func fetchExistingParameters(directoryPath string, env string, app string) (map[string]interface{}, error) {
+	path := parametersPath(directoryPath, env, app)
+
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		// File doesn't exist, return empty map
+		return make(map[string]interface{}), nil
+	}
+
+	var c *map[string]interface{}
+	yamlFile, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	err = yaml.Unmarshal(yamlFile, &c)
+	if err != nil {
+		return nil, err
+	}
+
+	return *c, nil
 }
 
 func resourceParametersRead(d *schema.ResourceData, m interface{}) error {
-	config := m.(*Config)
+	config := m.(*Config) // Retrieve the provider configuration
+	directoryPath := config.DirectoryPath
+
 	app := d.Get("app").(string)
 	env := d.Get("env").(string)
-	directoryPath := config.DirectoryPath // Use the directory path from the provider config
 
-	parametersFilePath := parametersFilePath(directoryPath, env, app)
+	parameters, err := fetchExistingParameters(directoryPath, env, app)
+	if err != nil {
+		return fmt.Errorf("Error when fetching existing parameters: %s", err)
+	}
 
-	yamlFile, err := os.ReadFile(parametersFilePath)
+	if err := d.Set("parameters", parameters); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func resourceParametersUpdate(d *schema.ResourceData, m interface{}) error {
+	config := m.(*Config)
+	directoryPath := config.DirectoryPath
+	definedParameters := d.Get("parameters").(map[string]interface{})
+	app := d.Get("app").(string)
+	env := d.Get("env").(string)
+
+	existingParameters, err := fetchExistingParameters(directoryPath, env, app)
 	if err != nil {
 		return err
 	}
 
-	c := &map[string]string{}
-	err = yaml.Unmarshal(yamlFile, c)
+	for parameterName, definedValue := range definedParameters {
+		val, ok := existingParameters[parameterName]
+		if !ok || val != definedValue {
+			// parameter not in the existing map or a value differs, let's add it
+			existingParameters[parameterName] = definedValue
+		}
+	}
+
+	for parameterName, _ := range existingParameters {
+		_, ok := definedParameters[parameterName]
+		if !ok {
+			// parameter is in the file, but is not defined anymore, removing
+			delete(existingParameters, parameterName)
+		}
+	}
+
+	yamlContent, err := mapToYaml(existingParameters)
 	if err != nil {
 		return err
 	}
 
-	// Update the Terraform state with the decrypted secrets
-	if err := d.Set("parameters", c); err != nil {
+	p := parametersPath(directoryPath, env, app)
+	// Write to parameters.yaml file
+	if err := os.WriteFile(p, []byte(yamlContent), 0600); err != nil {
+		return fmt.Errorf("could not write to file %s: %s", p, err)
+	}
+
+	if err := d.Set("parameters", existingParameters); err != nil {
 		return err
 	}
 
@@ -89,23 +151,21 @@ func resourceParametersRead(d *schema.ResourceData, m interface{}) error {
 }
 
 func resourceParametersDelete(d *schema.ResourceData, m interface{}) error {
-	directoryPath := d.Get("directory_path").(string)
+	config := m.(*Config)
+	directoryPath := config.DirectoryPath
 	app := d.Get("app").(string)
 	env := d.Get("env").(string)
 
-	parametersFilePath := parametersFilePath(directoryPath, env, app)
-
-	if _, err := os.Stat(parametersFilePath); err == nil {
-		if err := os.Remove(parametersFilePath); err != nil {
-			return fmt.Errorf("error removing parameters file %s: %s", parametersFilePath, err)
+	path := parametersPath(directoryPath, env, app)
+	// Check if the encrypted file exists
+	if _, err := os.Stat(path); err == nil {
+		// Delete encrypted file
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("error parameters file %s: %s", path, err)
 		}
-	} else if !os.IsNotExist(err) {
-		// File exists but could not be accessed for some reason
-		return fmt.Errorf("error checking parameters file %s: %s", parametersFilePath, err)
 	}
 
 	// After successfully deleting all files, unset the resource ID
 	d.SetId("")
-
 	return nil
 }
