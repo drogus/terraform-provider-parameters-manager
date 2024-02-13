@@ -74,7 +74,7 @@ func resourceParametersRead(d *schema.ResourceData, m interface{}) error {
 		return err
 	}
 
-  c := &map[string]string{}
+	c := &map[string]string{}
 	err = yaml.Unmarshal(yamlFile, c)
 	if err != nil {
 		return err
@@ -96,16 +96,16 @@ func resourceParametersDelete(d *schema.ResourceData, m interface{}) error {
 	parametersFilePath := parametersFilePath(directoryPath, env, app)
 
 	if _, err := os.Stat(parametersFilePath); err == nil {
-			if err := os.Remove(parametersFilePath); err != nil {
-        return fmt.Errorf("error removing parameters file %s: %s", parametersFilePath, err)
-			}
-		} else if !os.IsNotExist(err) {
-			// File exists but could not be accessed for some reason
-			return fmt.Errorf("error checking parameters file %s: %s", parametersFilePath, err)
+		if err := os.Remove(parametersFilePath); err != nil {
+			return fmt.Errorf("error removing parameters file %s: %s", parametersFilePath, err)
 		}
+	} else if !os.IsNotExist(err) {
+		// File exists but could not be accessed for some reason
+		return fmt.Errorf("error checking parameters file %s: %s", parametersFilePath, err)
+	}
 
 	// After successfully deleting all files, unset the resource ID
-  d.SetId("")
+	d.SetId("")
 
 	return nil
 }
