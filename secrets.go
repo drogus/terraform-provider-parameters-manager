@@ -99,7 +99,7 @@ func createSecret(directoryPath string, app string, env string, secretName strin
 		return err
 	}
 
-	if err := os.MkdirAll(secretsDir, 0644); err != nil {
+	if err := os.MkdirAll(secretsDir, 0755); err != nil {
 		return fmt.Errorf("could not create a directory %s: %s", secretsDir, err)
 	}
 
