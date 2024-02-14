@@ -49,13 +49,17 @@ func resourceSecrets() *schema.Resource {
 	}
 }
 
+func secretsDir(directoryPath string, env string, app string) string {
+	return filepath.Join(directoryPath, "applications/clusters", env, "charts", app, "secrets")
+}
+
 func secretPath(directoryPath string, env string, app string, secretName string, encrypted bool) string {
 	var encryptedSuffix string
 	if !encrypted {
 		encryptedSuffix = ".unencrypted"
 	}
 
-	return filepath.Join(directoryPath, "applications/clusters", env, "charts", app, "secrets", secretName+encryptedSuffix+".yaml")
+	return filepath.Join(secretsDir(directoryPath, env, app), secretName+encryptedSuffix+".yaml")
 }
 
 func resourceSecretsCreate(d *schema.ResourceData, m interface{}) error {
@@ -87,11 +91,16 @@ func createSecret(directoryPath string, app string, env string, secretName strin
 	unencryptedFilePath := secretPath(directoryPath, env, app, secretName, false)
 	encryptedFilePath := secretPath(directoryPath, env, app, secretName, true)
 	sopsConfigPath := filepath.Join(directoryPath, ".sops.yaml")
+	secretsDir := secretsDir(directoryPath, env, app)
 
 	// Convert single secret to YAML
 	yamlContent, err := mapToYaml(secretValue)
 	if err != nil {
 		return err
+	}
+
+	if err := os.MkdirAll(secretsDir, 0644); err != nil {
+		return fmt.Errorf("could not create a directory %s: %s", secretsDir, err)
 	}
 
 	// Write to unencrypted file
