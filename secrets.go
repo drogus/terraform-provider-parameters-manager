@@ -90,7 +90,7 @@ func createSecret(directoryPath string, app string, env string, secretName strin
 
 	unencryptedFilePath := secretPath(directoryPath, env, app, secretName, false)
 	encryptedFilePath := secretPath(directoryPath, env, app, secretName, true)
-	sopsConfigPath := filepath.Join(directoryPath, ".sops.yaml")
+	ageKeysPath := filepath.Join(directoryPath, "applications/clusters", env)
 	secretsDir := secretsDir(directoryPath, env, app)
 
 	// Convert single secret to YAML
@@ -109,7 +109,7 @@ func createSecret(directoryPath string, app string, env string, secretName strin
 	}
 
 	// Encrypt file with sops
-	if err := executeSopsEncrypt(sopsConfigPath, unencryptedFilePath, encryptedFilePath); err != nil {
+	if err := executeSopsEncrypt(ageKeysPath, unencryptedFilePath, encryptedFilePath); err != nil {
 		return fmt.Errorf("error encrypting file for secret %s: %s", secretName, err)
 	}
 
@@ -121,7 +121,7 @@ func createSecret(directoryPath string, app string, env string, secretName strin
 	return nil
 }
 
-func fetchExistingSecrets(sopsConfigPath string, directoryPath string, env string, app string) (map[string]interface{}, error) {
+func fetchExistingSecrets(ageKeysPath string, directoryPath string, env string, app string) (map[string]interface{}, error) {
 	// Placeholder for the decrypted secrets map
 	decryptedSecrets := make(map[string]interface{})
 
@@ -141,7 +141,7 @@ func fetchExistingSecrets(sopsConfigPath string, directoryPath string, env strin
 		encryptedFilePath := secretPath(directoryPath, env, app, name, true)
 
 		// Decrypt the file with sops and read the secret value
-		decryptedData, exists, err := decryptSopsFile(sopsConfigPath, encryptedFilePath)
+		decryptedData, exists, err := decryptSopsFile(ageKeysPath, encryptedFilePath)
 		if err != nil {
 			return nil, err
 		}
@@ -169,9 +169,9 @@ func resourceSecretsRead(d *schema.ResourceData, m interface{}) error {
 
 	app := d.Get("app").(string)
 	env := d.Get("env").(string)
-	sopsConfigPath := filepath.Join(directoryPath, ".sops.yaml")
+	ageKeysPath := filepath.Join(directoryPath, "applications/clusters", env)
 
-	decryptedSecrets, err := fetchExistingSecrets(sopsConfigPath, directoryPath, env, app)
+	decryptedSecrets, err := fetchExistingSecrets(ageKeysPath, directoryPath, env, app)
 	if err != nil {
 		return fmt.Errorf("Error when fetching existing secrets: %s", err)
 	}
@@ -190,9 +190,9 @@ func resourceSecretsUpdate(d *schema.ResourceData, m interface{}) error {
 	definedSecrets := d.Get("secrets").(map[string]interface{})
 	app := d.Get("app").(string)
 	env := d.Get("env").(string)
-	sopsConfigPath := filepath.Join(directoryPath, ".sops.yaml")
+	ageKeysPath := filepath.Join(directoryPath, "applications/clusters", env)
 
-	existingSecrets, err := fetchExistingSecrets(sopsConfigPath, directoryPath, env, app)
+	existingSecrets, err := fetchExistingSecrets(ageKeysPath, directoryPath, env, app)
 	if err != nil {
 		return err
 	}
@@ -236,14 +236,16 @@ func listSecretFiles(directoryPath, env, app string) ([]string, error) {
 }
 
 // decryptSopsFile uses `sops` to decrypt a file and returns the decrypted secret value.
-func decryptSopsFile(sopsConfigPath string, filePath string) (map[string]interface{}, bool, error) {
+func decryptSopsFile(ageKeysPath string, filePath string) (map[string]interface{}, bool, error) {
 	if _, err := os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
 		// File doesn't exist, return nothing
 		return nil, false, nil
 	}
 
 	// Execute sops command to decrypt the file
-	cmd := exec.Command("sops", "--config", sopsConfigPath, "-d", filePath)
+	env := fmt.Sprintf("SOPS_AGE_KEY_FILE=%s", filepath.Join(ageKeysPath, "age-key.txt"))
+	publicKeyPath := filepath.Join(ageKeysPath, "age-public-key.txt")
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("%s sops --config <(echo '') --age $(< %s) -d %s", env, publicKeyPath, filePath))
 
 	var out, errb bytes.Buffer
 	cmd.Stderr = &errb
@@ -271,9 +273,9 @@ func resourceSecretsDelete(d *schema.ResourceData, m interface{}) error {
 	directoryPath := config.DirectoryPath
 	app := d.Get("app").(string)
 	env := d.Get("env").(string)
-	sopsConfigPath := filepath.Join(directoryPath, ".sops.yaml")
+	ageKeysPath := filepath.Join(directoryPath, "applications/clusters", env)
 
-	existingSecrets, err := fetchExistingSecrets(sopsConfigPath, directoryPath, env, app)
+	existingSecrets, err := fetchExistingSecrets(ageKeysPath, directoryPath, env, app)
 	if err != nil {
 		return err
 	}
@@ -299,9 +301,10 @@ func resourceSecretsDelete(d *schema.ResourceData, m interface{}) error {
 }
 
 // executeSopsEncrypt encrypts a file with sops.
-func executeSopsEncrypt(sopsConfigPath, sourcePath, destPath string) error {
-	// Since the redirection operator (>) is a shell feature, you might need to run this command through a shell interpreter like bash or sh
-	cmd := exec.Command("bash", "-c", "sops --config "+sopsConfigPath+" -e "+sourcePath+" > "+destPath)
+func executeSopsEncrypt(ageKeysPath string, sourcePath string, destPath string) error {
+	env := fmt.Sprintf("SOPS_AGE_KEY_FILE=%s", filepath.Join(ageKeysPath, "age-key.txt"))
+	publicKeyPath := filepath.Join(ageKeysPath, "age-public-key.txt")
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("%s sops --config <(echo '') --age $(< %s) -e %s > %s", env, publicKeyPath, sourcePath, destPath))
 
 	var errb bytes.Buffer
 	cmd.Stderr = &errb
