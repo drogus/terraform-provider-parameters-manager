@@ -25,7 +25,6 @@ func mapToYaml(data map[string]interface{}) (string, error) {
 
 func resourceSecrets() *schema.Resource {
 	return &schema.Resource{
-		// Removed "directory_path" from the schema
 		Schema: map[string]*schema.Schema{
 			"secrets": {
 				Type:      schema.TypeMap,
@@ -63,13 +62,25 @@ func secretPath(directoryPath string, env string, app string, secretName string,
 }
 
 func resourceSecretsCreate(d *schema.ResourceData, m interface{}) error {
-	config := m.(*Config)                 // Cast the interface{} to *Config
+	config, ok := m.(*Config) // Cast the interface{} to *Config
+	if !ok {
+		return fmt.Errorf("Could not fetch plugin config")
+	}
 	directoryPath := config.DirectoryPath // Use the directory path from the provider config
 	awsProfile := config.AwsProfile
 
-	secrets := d.Get("secrets").(map[string]interface{})
-	app := d.Get("app").(string)
-	env := d.Get("env").(string)
+	secrets, ok := d.Get("secrets").(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("Could not fetch parameter secrets")
+	}
+	app, ok := d.Get("app").(string)
+	if !ok {
+		return fmt.Errorf("Could not fetch parameter app")
+	}
+	env, ok := d.Get("env").(string)
+	if !ok {
+		return fmt.Errorf("Could not fetch parameter env")
+	}
 
 	for secretName, val := range secrets {
 		err := createSecret(awsProfile, directoryPath, app, env, secretName, val)
@@ -165,12 +176,21 @@ func isNil(c interface{}) bool {
 }
 
 func resourceSecretsRead(d *schema.ResourceData, m interface{}) error {
-	config := m.(*Config) // Retrieve the provider configuration
+	config, ok := m.(*Config) // Retrieve the provider configuration
+	if !ok {
+		return fmt.Errorf("Could not fetch plugin config")
+	}
 	directoryPath := config.DirectoryPath
 	awsProfile := config.AwsProfile
 
-	app := d.Get("app").(string)
-	env := d.Get("env").(string)
+	app, ok := d.Get("app").(string)
+	if !ok {
+		return fmt.Errorf("Could not fetch parameter app")
+	}
+	env, ok := d.Get("env").(string)
+	if !ok {
+		return fmt.Errorf("Could not fetch parameter env")
+	}
 
 	decryptedSecrets, err := fetchExistingSecrets(awsProfile, directoryPath, env, app)
 	if err != nil {
@@ -186,13 +206,25 @@ func resourceSecretsRead(d *schema.ResourceData, m interface{}) error {
 }
 
 func resourceSecretsUpdate(d *schema.ResourceData, m interface{}) error {
-	config := m.(*Config)
+	config, ok := m.(*Config)
+	if !ok {
+		return fmt.Errorf("Could not fetch plugin config")
+	}
 	directoryPath := config.DirectoryPath
 	awsProfile := config.AwsProfile
 
-	definedSecrets := d.Get("secrets").(map[string]interface{})
-	app := d.Get("app").(string)
-	env := d.Get("env").(string)
+	definedSecrets, ok := d.Get("secrets").(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("Could not fetch parameter secrets")
+	}
+	app, ok := d.Get("app").(string)
+	if !ok {
+		return fmt.Errorf("Could not fetch parameter app")
+	}
+	env, ok := d.Get("env").(string)
+	if !ok {
+		return fmt.Errorf("Could not fetch parameter env")
+	}
 	ageKeysPath := filepath.Join(directoryPath, "applications/clusters", env)
 
 	existingSecrets, err := fetchExistingSecrets(ageKeysPath, directoryPath, env, app)
@@ -257,7 +289,7 @@ func decryptSopsFile(awsProfile string, env string, filePath string) (map[string
 	err := cmd.Run()
 
 	if err != nil {
-		return nil, true, fmt.Errorf("%s", errb)
+		return nil, true, fmt.Errorf("%s", errb.String())
 	}
 
 	// Parse the output to extract the secret value
@@ -271,10 +303,19 @@ func decryptSopsFile(awsProfile string, env string, filePath string) (map[string
 }
 
 func resourceSecretsDelete(d *schema.ResourceData, m interface{}) error {
-	config := m.(*Config)
+	config, ok := m.(*Config)
+	if !ok {
+		return fmt.Errorf("Could not fetch plugin config")
+	}
 	directoryPath := config.DirectoryPath
-	app := d.Get("app").(string)
-	env := d.Get("env").(string)
+	app, ok := d.Get("app").(string)
+	if !ok {
+		return fmt.Errorf("Could not fetch parameter app")
+	}
+	env, ok := d.Get("env").(string)
+	if !ok {
+		return fmt.Errorf("Could not fetch parameter env")
+	}
 	ageKeysPath := filepath.Join(directoryPath, "applications/clusters", env)
 
 	existingSecrets, err := fetchExistingSecrets(ageKeysPath, directoryPath, env, app)
@@ -314,7 +355,7 @@ func executeSopsEncrypt(env string, awsProfile string, sourcePath string, destPa
 	err := cmd.Run()
 
 	if err != nil {
-		return fmt.Errorf("%s", errb)
+		return fmt.Errorf("%s", errb.String())
 	}
 	return nil
 }
