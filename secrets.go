@@ -65,12 +65,14 @@ func secretPath(directoryPath string, env string, app string, secretName string,
 func resourceSecretsCreate(d *schema.ResourceData, m interface{}) error {
 	config := m.(*Config)                 // Cast the interface{} to *Config
 	directoryPath := config.DirectoryPath // Use the directory path from the provider config
+	awsProfile := config.AwsProfile
+
 	secrets := d.Get("secrets").(map[string]interface{})
 	app := d.Get("app").(string)
 	env := d.Get("env").(string)
 
 	for secretName, val := range secrets {
-		err := createSecret(directoryPath, app, env, secretName, val)
+		err := createSecret(awsProfile, directoryPath, app, env, secretName, val)
 		if err != nil {
 			return fmt.Errorf("Couldn't create a secret %s: %s", secretName, err)
 		}
@@ -82,7 +84,7 @@ func resourceSecretsCreate(d *schema.ResourceData, m interface{}) error {
 	return nil
 }
 
-func createSecret(directoryPath string, app string, env string, secretName string, val interface{}) error {
+func createSecret(awsProfile, directoryPath string, app string, env string, secretName string, val interface{}) error {
 	secretValue := map[string]interface{}{
 		"value":     val,
 		"managedBy": "terraform-provider-parameters-manager",
@@ -90,7 +92,6 @@ func createSecret(directoryPath string, app string, env string, secretName strin
 
 	unencryptedFilePath := secretPath(directoryPath, env, app, secretName, false)
 	encryptedFilePath := secretPath(directoryPath, env, app, secretName, true)
-	ageKeysPath := filepath.Join(directoryPath, "applications/clusters", env)
 	secretsDir := secretsDir(directoryPath, env, app)
 
 	// Convert single secret to YAML
@@ -109,7 +110,7 @@ func createSecret(directoryPath string, app string, env string, secretName strin
 	}
 
 	// Encrypt file with sops
-	if err := executeSopsEncrypt(ageKeysPath, unencryptedFilePath, encryptedFilePath); err != nil {
+	if err := executeSopsEncrypt(env, awsProfile, unencryptedFilePath, encryptedFilePath); err != nil {
 		return fmt.Errorf("error encrypting file for secret %s: %s", secretName, err)
 	}
 
@@ -121,7 +122,7 @@ func createSecret(directoryPath string, app string, env string, secretName strin
 	return nil
 }
 
-func fetchExistingSecrets(ageKeysPath string, directoryPath string, env string, app string) (map[string]interface{}, error) {
+func fetchExistingSecrets(awsProfile string, directoryPath string, env string, app string) (map[string]interface{}, error) {
 	// Placeholder for the decrypted secrets map
 	decryptedSecrets := make(map[string]interface{})
 
@@ -141,7 +142,7 @@ func fetchExistingSecrets(ageKeysPath string, directoryPath string, env string, 
 		encryptedFilePath := secretPath(directoryPath, env, app, name, true)
 
 		// Decrypt the file with sops and read the secret value
-		decryptedData, exists, err := decryptSopsFile(ageKeysPath, encryptedFilePath)
+		decryptedData, exists, err := decryptSopsFile(awsProfile, env, encryptedFilePath)
 		if err != nil {
 			return nil, err
 		}
@@ -166,12 +167,12 @@ func isNil(c interface{}) bool {
 func resourceSecretsRead(d *schema.ResourceData, m interface{}) error {
 	config := m.(*Config) // Retrieve the provider configuration
 	directoryPath := config.DirectoryPath
+	awsProfile := config.AwsProfile
 
 	app := d.Get("app").(string)
 	env := d.Get("env").(string)
-	ageKeysPath := filepath.Join(directoryPath, "applications/clusters", env)
 
-	decryptedSecrets, err := fetchExistingSecrets(ageKeysPath, directoryPath, env, app)
+	decryptedSecrets, err := fetchExistingSecrets(awsProfile, directoryPath, env, app)
 	if err != nil {
 		return fmt.Errorf("Error when fetching existing secrets: %s", err)
 	}
@@ -187,6 +188,8 @@ func resourceSecretsRead(d *schema.ResourceData, m interface{}) error {
 func resourceSecretsUpdate(d *schema.ResourceData, m interface{}) error {
 	config := m.(*Config)
 	directoryPath := config.DirectoryPath
+	awsProfile := config.AwsProfile
+
 	definedSecrets := d.Get("secrets").(map[string]interface{})
 	app := d.Get("app").(string)
 	env := d.Get("env").(string)
@@ -203,7 +206,7 @@ func resourceSecretsUpdate(d *schema.ResourceData, m interface{}) error {
 			// secret not in the existing map or a value differs, let's add it
 			// and create the file
 			existingSecrets[secretName] = definedValue
-			err := createSecret(directoryPath, app, env, secretName, definedValue)
+			err := createSecret(awsProfile, directoryPath, app, env, secretName, definedValue)
 			if err != nil {
 				return fmt.Errorf("Couldn't create a secret %s: %s", secretName, err)
 			}
@@ -236,16 +239,15 @@ func listSecretFiles(directoryPath, env, app string) ([]string, error) {
 }
 
 // decryptSopsFile uses `sops` to decrypt a file and returns the decrypted secret value.
-func decryptSopsFile(ageKeysPath string, filePath string) (map[string]interface{}, bool, error) {
+func decryptSopsFile(awsProfile string, env string, filePath string) (map[string]interface{}, bool, error) {
 	if _, err := os.Stat(filePath); errors.Is(err, os.ErrNotExist) {
 		// File doesn't exist, return nothing
 		return nil, false, nil
 	}
 
 	// Execute sops command to decrypt the file
-	env := fmt.Sprintf("SOPS_AGE_KEY_FILE=%s", filepath.Join(ageKeysPath, "age-key.txt"))
-	publicKeyPath := filepath.Join(ageKeysPath, "age-public-key.txt")
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("%s sops --config <(echo '') --age $(< %s) -d %s", env, publicKeyPath, filePath))
+	key := fmt.Sprintf("SOPS_AGE_KEY=$(aws ssm get-parameter --name /kubernetes/clusters/%s/age_key --with-decryption --query Parameter.Value --output text --profile %s --region us-east-1)", env, awsProfile)
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("%s sops --config <(echo '') -d %s", key, filePath))
 
 	var out, errb bytes.Buffer
 	cmd.Stderr = &errb
@@ -301,10 +303,9 @@ func resourceSecretsDelete(d *schema.ResourceData, m interface{}) error {
 }
 
 // executeSopsEncrypt encrypts a file with sops.
-func executeSopsEncrypt(ageKeysPath string, sourcePath string, destPath string) error {
-	env := fmt.Sprintf("SOPS_AGE_KEY_FILE=%s", filepath.Join(ageKeysPath, "age-key.txt"))
-	publicKeyPath := filepath.Join(ageKeysPath, "age-public-key.txt")
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("%s sops --config <(echo '') --age $(< %s) -e %s > %s", env, publicKeyPath, sourcePath, destPath))
+func executeSopsEncrypt(env string, awsProfile string, sourcePath string, destPath string) error {
+	key := fmt.Sprintf("SOPS_AGE_RECIPIENTS=$(aws ssm get-parameter --name /kubernetes/clusters/%s/age_public_key --with-decryption --query Parameter.Value --output text --profile %s --region us-east-1)", env, awsProfile)
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("%s sops --config <(echo '') -e %s > %s", key, sourcePath, destPath))
 
 	var errb bytes.Buffer
 	cmd.Stderr = &errb

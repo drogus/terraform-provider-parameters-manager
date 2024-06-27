@@ -14,6 +14,11 @@ func Provider() *schema.Provider {
 				Required:    true,
 				Description: "The path to the directory where secrets should be saved.",
 			},
+			"aws_profile": {
+				Type:        schema.TypeString,
+				Required:    true,
+				Description: "AWS profile to use for secrets",
+			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
 			"parameters-manager_secrets":    resourceSecrets(),
@@ -27,6 +32,7 @@ func Provider() *schema.Provider {
 func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 	config := Config{
 		DirectoryPath: d.Get("directory_path").(string),
+		AwsProfile:    d.Get("aws_profile").(string),
 	}
 	return &config, nil
 }
@@ -34,6 +40,7 @@ func providerConfigure(d *schema.ResourceData) (interface{}, error) {
 // Config struct holds provider configuration.
 type Config struct {
 	DirectoryPath string
+	AwsProfile    string
 }
 
 func main() {
