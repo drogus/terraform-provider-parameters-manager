@@ -27,17 +27,17 @@ func resourceSecrets() *schema.Resource {
 	return &schema.Resource{
 		// Removed "directory_path" from the schema
 		Schema: map[string]*schema.Schema{
-			"secrets": &schema.Schema{
+			"secrets": {
 				Type:      schema.TypeMap,
 				Required:  true,
 				Elem:      &schema.Schema{Type: schema.TypeString},
 				Sensitive: true,
 			},
-			"app": &schema.Schema{
+			"app": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"env": &schema.Schema{
+			"env": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
@@ -213,7 +213,7 @@ func resourceSecretsUpdate(d *schema.ResourceData, m interface{}) error {
 		}
 	}
 
-	for secretName, _ := range existingSecrets {
+	for secretName := range existingSecrets {
 		_, ok := definedSecrets[secretName]
 		if !ok {
 			// secret is in the file, but is not defined anymore, removing
@@ -282,7 +282,7 @@ func resourceSecretsDelete(d *schema.ResourceData, m interface{}) error {
 		return err
 	}
 
-	for secretName, _ := range existingSecrets {
+	for secretName := range existingSecrets {
 		encryptedFilePath := secretPath(directoryPath, env, app, secretName, true)
 
 		// Check if the encrypted file exists

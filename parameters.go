@@ -14,16 +14,16 @@ func resourceParameters() *schema.Resource {
 	return &schema.Resource{
 		// Removed "directory_path" from the schema
 		Schema: map[string]*schema.Schema{
-			"parameters": &schema.Schema{
+			"parameters": {
 				Type:     schema.TypeMap,
 				Required: true,
 				Elem:     &schema.Schema{Type: schema.TypeString},
 			},
-			"app": &schema.Schema{
+			"app": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
-			"env": &schema.Schema{
+			"env": {
 				Type:     schema.TypeString,
 				Required: true,
 			},
@@ -124,7 +124,7 @@ func resourceParametersUpdate(d *schema.ResourceData, m interface{}) error {
 		}
 	}
 
-	for parameterName, _ := range existingParameters {
+	for parameterName := range existingParameters {
 		_, ok := definedParameters[parameterName]
 		if !ok {
 			// parameter is in the file, but is not defined anymore, removing
