@@ -88,8 +88,6 @@ func resourceSecretsCreate(ctx context.Context, d *schema.ResourceData, m interf
 		return diag.Errorf("Could not fetch parameter 'env'")
 	}
 
-	tflog.Error(ctx, fmt.Sprintf("TESTING LOG VISIBILITY: Create secrets: app=%s, env=%s, directoryPath=%s, secretCount=%d", app, env, directoryPath, len(secrets)))
-
 	for secretName, val := range secrets {
 		tflog.Debug(ctx, fmt.Sprintf("Creating secret: name=%s", secretName))
 		err := createSecret(ctx, awsProfile, directoryPath, app, env, secretName, val)
